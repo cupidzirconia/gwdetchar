@@ -120,7 +120,8 @@ def _generate_cluster(input_):
             # plot
             fig = Plot(figsize=(12, 4))
             fig.subplots_adjust(*p7)
-            ax = fig.gca(xscale='auto-gps')
+            ax = fig.gca()
+            ax.set_xscale('auto-gps')
             ax.plot(
                 times, scale(currentts.value)*numpy.sign(input_[1][1]),
                 label=texify(currentchan), linewidth=line_size_aux,
@@ -197,15 +198,21 @@ def _process_channel(input_):
         ax1 = fig.add_subplot(2, 1, 1, xscale='auto-gps', epoch=start)
         ax1.plot(primaryts, label=texify(primary), color='black',
                  linewidth=line_size_primary)
+        
         # -- plot vertical dotted lines to visually divide time segments
-        for j in total_len:
-            plt.axvline(x=start+int(j), color='red', linestyle='dashed')  
+        for j in total_len[0:-1]:
+            plt.axvline(x=start+int(j), color='red', linestyle='dashed') 
+            
+            
         ax1.set_xlabel(None)
         ax2 = fig.add_subplot(2, 1, 2, sharex=ax1, xlim=xlim)
         ax2.plot(times, auxdata[chan], label=texify(chan), linewidth=line_size_aux)
+        
         # -- plot vertical dotted lines to visually divide time segments
-        for j in total_len:
-            plt.axvline(x=start+int(j), color='red', linestyle='dashed')  
+        for j in total_len[0:-1]:
+            plt.axvline(x=start+int(j), color='red', linestyle='dashed') 
+            
+            
         if range_is_primary:
             ax1.set_ylabel('Sensitive range [Mpc]')
         else:
@@ -224,14 +231,20 @@ def _process_channel(input_):
             tsscaled = numpy.negative(tsscaled)
         fig = Plot(figsize=(12, 4))
         fig.subplots_adjust(*p1)
-        ax = fig.gca(xscale='auto-gps', epoch=start, xlim=xlim)
+        ax = fig.gca()
+        ax.set_xscale('auto-gps')
+        ax.set_epoch(start)
+        ax.set_xlim(xlim)
         ax.plot(times, _descaler(target), label=texify(primary),
                 color='black', linewidth=line_size_primary)
         ax.plot(times, _descaler(tsscaled), label=texify(chan),
                 linewidth=line_size_aux)
+        
         # -- plot vertical dotted lines to visually divide time segments
-        for j in total_len:
+        for j in total_len[0:-1]:
             plt.axvline(x=start+int(j), color='red', linestyle='dashed')  
+            
+            
         if range_is_primary:
             ax.set_ylabel('Sensitive range [Mpc]')
         else:
@@ -306,9 +319,9 @@ def get_active_segs(start, end, ifo):
     Get active flag segments for the ifo
     - used for getting primary & aux channel data
     """
-    #usable_flag = f"{ifo}:DMT-ANALYSIS_READY:1"
-    usable_flag = f"{ifo}:DMT-GRD_ISC_LOCK_NOMINAL:1"
-    span_dif = 180
+    usable_flag = f"{ifo}:DMT-ANALYSIS_READY:1"
+    # usable_flag = f"{ifo}:DMT-GRD_ISC_LOCK_NOMINAL:1"
+    span_dif = 1800
     active_times = DataQualityFlag.query(usable_flag, start, end).active
     active_times = [span for span in active_times if span[1] - span[0] > span_dif]
     # list segs for logger msg
@@ -363,7 +376,7 @@ def primary_stitch(primary_channel, primary_frametype,
     else:
         new_end = new_start+60*len(primary_values)
     times = numpy.linspace(new_start, new_end, len(primary_values))
-    return TimeSeries(primary_values, times=times), total_primaryts
+    return TimeSeries(primary_values, times=times), total_primaryts, primary_times
 
 
 
@@ -381,8 +394,8 @@ def aux_stitch(channel_list, aux_frametype, active_segs, nproc=1):
                     f'({segment.start}, {segment.end})')
         seg_aux_data = get_data(channel_list, segment.start,
                                 segment.end, verbose='Reading:'.rjust(30),
-                                frametype=aux_frametype, nproc=nproc).crop(segment.start,
-                                                                           segment.end)
+                                frametype=aux_frametype, 
+                                nproc=nproc).crop(segment.start,segment.end)
         # k=channel name, v=timeseries
         for k, v in seg_aux_data.items():
             if k in auxdata:
@@ -665,12 +678,13 @@ def main(args=None):
     else:
         # load primary channel data
         LOGGER.info("-- Loading primary channel data")
-        primaryts, total_primaryts = get_primary_ts(channel=primary, start=start,
-                                                    end=end, active_segs=active_segs,
-                                                    filepath=args.primary_file,
-                                                    frametype=args.primary_frametype,
-                                                    cache=args.primary_cache,
-                                                    nproc=args.nproc)
+        primaryts, total_primaryts, primary_times = get_primary_ts(channel=primary, 
+                                                                   start=start,end=end, 
+                                                                   active_segs=active_segs,
+                                                                   filepath=args.primary_file,
+                                                                   frametype=args.primary_frametype,
+                                                                   cache=args.primary_cache,
+                                                                   nproc=args.nproc)
 
     if args.remove_outliers:
         LOGGER.debug(
@@ -710,7 +724,6 @@ def main(args=None):
     # -- removes flat data to be re-introdused later
 
     LOGGER.info('-- Pre-processing auxiliary channel data')
-
     auxdata = gwlasso.remove_flat(auxdata)
     flatable = Table(data=(list(set(channels) - set(auxdata.keys())),),
                      names=('Channels',))
@@ -781,7 +794,7 @@ def main(args=None):
     p1 = (.1, .15, .9, .9)  # global plot defaults for plot1, lasso model
 
     times = primaryts.times.value
-    total_times = total_primaryts.times
+    total_times = total_primaryts.times    
     xlim = primaryts.span
     total_xlim = total_primaryts.span
     cmap = get_cmap('tab20')
@@ -789,17 +802,20 @@ def main(args=None):
 
     plot = Plot(figsize=(12, 4))
     plot.subplots_adjust(*p1)
-    ax = plot.gca(xscale='auto-gps', epoch=start, xlim=xlim)
-#    ax = plot.gca()
-#    ax.subplot(xscale='auto-gps', epoch=start, xlim=xlim)
+    ax = plot.gca()
+    ax.set_xscale('auto-gps')
+    ax.set_epoch(start)
+    ax.set_xlim(xlim)
     ax.plot(times, _descaler(target), label=texify(primary),
             color='black', linewidth=line_size_primary)
     ax.plot(times, _descaler(modelFit), label='Lasso model',
             linewidth=line_size_aux)
+    
     # -- plot vertical dotted lines to visually divide time segments
-    total_len.pop()
-    for j in total_len:
+    for j in total_len[0:-1]:
         plt.axvline(x=start+int(j), color='red', linestyle='dashed')
+        
+        
     if range_is_primary:
         ax.set_ylabel('Sensitive range [Mpc]')
         ax.set_title('Stitched Lasso Model of Range')
@@ -823,20 +839,26 @@ def main(args=None):
     # Real-Time lasso model 
     zero_list = numpy.where(total_primaryts.value == 0)
     total_modelFit = _descaler(modelFit).copy()
+    float_primary_times = []
+    for time in primary_times:
+        float_primary_times.append(time.value)
     for i in zero_list[0]:
         total_modelFit.insert(i, 0)
-    #usable_flag = f"{args.ifo}:DMT-ANALYSIS_READY:1"
-    usable_flag = f"{args.ifo}:DMT-GRD_ISC_LOCK_NOMINAL:1"
+    usable_flag = f"{args.ifo}:DMT-ANALYSIS_READY:1"
+    # usable_flag = f"{args.ifo}:DMT-GRD_ISC_LOCK_NOMINAL:1"
     dataquality_times = DataQualityFlag.query(usable_flag, total_primaryts.times[0], total_primaryts.times[-1])
     plot = Plot(figsize=(12, 4.5))
     plot.subplots_adjust(*p1)
-    ax = plot.gca(xscale='auto-gps', epoch=start, xlim=total_xlim)
-#    ax = plot.gca()
-#    ax.subplot(xscale='auto-gps', epoch=start, xlim=total_xlim)
+    ax = plot.gca()
+    ax.set_xscale('auto-gps')
+    ax.set_epoch(start)
+    ax.set_xlim(total_xlim)
     ax.plot(total_primaryts, label=texify(primary),
-            color='black', linewidth=line_size_primary)
-    ax.plot(total_primaryts.times, total_modelFit, label='Real-Time Lasso model',
-            color=colors[0], linewidth=line_size_aux)
+        color='black', linewidth=line_size_primary)
+
+    ax.plot(float_primary_times, _descaler(modelFit), label='Real-Time Lasso Model',
+        color=colors[0], linestyle='', linewidth=line_size_aux, marker=".", markersize=2)
+    
     if range_is_primary:
         ax.set_ylabel('Sensitive range [Mpc]')
         ax.set_title('Real-Time Lasso Model of Range')
@@ -852,9 +874,10 @@ def main(args=None):
     # summed contributions
     plot = Plot(figsize=(12, 4))
     plot.subplots_adjust(*p1)
-    ax = plot.gca(xscale='auto-gps', epoch=start, xlim=xlim)
-#    ax = plot.gca()
-#    ax.subplot(xscale='auto-gps', epoch=start, xlim=xlim)
+    ax = plot.gca()
+    ax.set_xscale('auto-gps')
+    ax.set_epoch(start)
+    ax.set_xlim(xlim)
     ax.plot(times, _descaler(target), label=texify(primary),
             color='black', linewidth=line_size_primary)
     summed = 0
@@ -866,9 +889,12 @@ def main(args=None):
             label = 'Channel 1'
         ax.plot(times, _descaler(summed), label=label, color=colors[i],
                 linewidth=line_size_aux)
+        
         # -- plot vertical dotted lines to visually divide time segments
-        for j in total_len:
+        for j in total_len[0:-1]:
             plt.axvline(x=start+int(j), color='red', linestyle='dashed')  
+            
+            
     if range_is_primary:
         ax.set_ylabel('Sensitive range [Mpc]')
     else:
@@ -882,14 +908,18 @@ def main(args=None):
     # individual contributions
     plot = Plot(figsize=(12, 4))
     plot.subplots_adjust(*p1)
-    ax = plot.gca(xscale='auto-gps', epoch=start, xlim=xlim)
-#    ax = plot.gca()
-#    ax.subplot(xscale='auto-gps', epoch=start, xlim=xlim)
+    ax = plot.gca()
+    ax.set_xscale('auto-gps')
+    ax.set_epoch(start)
+    ax.set_xlim(xlim)
     ax.plot(times, _descaler(target), label=texify(primary),
             color='black', linewidth=line_size_primary)
+    
     # -- plot vertical dotted lines to visually divide time segments
-    for j in total_len:
+    for j in total_len[0:-1]:
         plt.axvline(x=start+int(j), color='red', linestyle='dashed')
+        
+        
     for i, name in enumerate(results['Channel']):
         this = _descaler(scale(nonzerodata[name].value) * nonzerocoef[name])
         if i:
@@ -898,9 +928,12 @@ def main(args=None):
             label = 'Channel 1'
         ax.plot(times, this, label=texify(name), color=colors[i],
                 linewidth=line_size_aux)
+        
         # -- plot vertical dotted lines to visually divide time segments
-        for j in total_len:
+        for j in total_len[0:-1]:
             plt.axvline(x=start+int(j), color='red', linestyle='dashed')
+            
+            
     if range_is_primary:
         ax.set_ylabel('Sensitive range [Mpc]')
     else:
